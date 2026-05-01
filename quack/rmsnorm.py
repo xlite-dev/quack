@@ -351,6 +351,8 @@ def _rmsnorm_fwd(
         assert weight.dtype in supported_types, "Weight must be float32, float16 or bfloat16"
     if residual is not None:
         assert residual.dtype in supported_types, "Residual must be float16, bfloat16, or float32"
+    if x.numel() == 0:
+        return
 
     N = x.size(-1)
     per_head = (weight is not None and weight.dim() == 2) or (bias is not None and bias.dim() == 2)
@@ -494,8 +496,7 @@ def rmsnorm_fwd(
         )
     else:
         residual_out = None
-    if x.numel() > 0:
-        _rmsnorm_fwd(x, weight, out, bias, rstd, None, residual, residual_out, eps, False)
+    _rmsnorm_fwd(x, weight, out, bias, rstd, None, residual, residual_out, eps, False)
     # residual_out is None if residual is None and residual_dtype == input_dtype and dropout_p == 0.0
     if residual_out is None:
         residual_out = x
@@ -964,6 +965,8 @@ def _rmsnorm_bwd(
     if dresidual is not None:
         assert dresidual.shape == x.shape
         assert dresidual.dtype in supported_types, "Residual must be float16, bfloat16, or float32"
+    if x.numel() == 0:
+        return
 
     N = x.size(-1)
     if dw_partial is None and db_partial is None:

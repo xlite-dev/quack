@@ -200,6 +200,8 @@ def _softmax_fwd(x: torch.Tensor, out: torch.Tensor) -> None:
     """
     assert x.dim() == 2, "Input must be 2D"
     assert x.dtype in [torch.float16, torch.bfloat16, torch.float32], "Unsupported dtype"
+    if x.numel() == 0:
+        return
     N = x.size(1)
     dtype, out_dtype = [torch2cute_dtype_map[t.dtype] for t in [x, out]]
     _compile_softmax_fwd(dtype, out_dtype, N)(x, out)
@@ -224,8 +226,7 @@ def _softmax_fwd_fake(x: torch.Tensor, out: torch.Tensor) -> None:
 
 def softmax_fwd(x: torch.Tensor) -> torch.Tensor:
     out = torch.empty_like(x)
-    if x.numel() > 0:
-        _softmax_fwd(x, out)
+    _softmax_fwd(x, out)
     return out
 
 
@@ -401,6 +402,8 @@ def _softmax_backward(dy: torch.Tensor, y: torch.Tensor, dx: torch.Tensor) -> No
     assert dy.shape == y.shape, "dy and y must have same shape"
     assert dy.dtype in [torch.float16, torch.bfloat16, torch.float32], "Unsupported dtype"
     assert y.dtype == dy.dtype, "dy and y must have same dtype"
+    if dy.numel() == 0:
+        return
     N = dy.size(1)
     dtype, y_dtype, dx_dtype = [torch2cute_dtype_map[t.dtype] for t in [dy, y, dx]]
     _compile_softmax_backward(dtype, y_dtype, dx_dtype, N)(dy, y, dx)
@@ -419,8 +422,7 @@ def _softmax_backward_fake(dy: torch.Tensor, y: torch.Tensor, dx: torch.Tensor) 
 
 def softmax_bwd(dy: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
     dx = torch.empty_like(dy)
-    if dy.numel() > 0:
-        _softmax_backward(dy, y, dx)
+    _softmax_backward(dy, y, dx)
     return dx
 
 

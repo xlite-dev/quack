@@ -230,6 +230,8 @@ def _topk_fwd(
     assert x.dim() == 2, "Input must be 2D"
     assert x.dtype in [torch.float16, torch.bfloat16, torch.float32], "Unsupported dtype"
     assert k > 0 and k <= x.shape[1], "k must be positive and <= N"
+    if x.numel() == 0:
+        return
 
     N = x.size(1)
     dtype = torch2cute_dtype_map[x.dtype]
@@ -284,8 +286,7 @@ def topk_fwd(x: torch.Tensor, k: int, softmax: bool = False):
     M = x.size(0)
     values = torch.empty((M, k), dtype=x.dtype, device=x.device)
     indices = torch.empty((M, k), dtype=torch.int32, device=x.device)
-    if x.numel() > 0:
-        _topk_fwd(x, k, softmax, values, indices)
+    _topk_fwd(x, k, softmax, values, indices)
     return values, indices
 
 
@@ -479,6 +480,8 @@ def _topk_bwd(
         assert values.dim() == 2, "values must be 2D"
     assert indices.dim() == 2, "indices must be 2D"
     assert dvalues.dtype in [torch.float16, torch.bfloat16, torch.float32], "Unsupported dtype"
+    if dvalues.numel() == 0:
+        return
 
     N = dx.size(1)
     dtype = torch2cute_dtype_map[dvalues.dtype]
@@ -548,8 +551,7 @@ def topk_bwd(
     """
     M, k = dvalues.shape
     dx = torch.zeros((M, N), dtype=dvalues.dtype, device=dvalues.device)
-    if dvalues.numel() > 0:
-        _topk_bwd(dvalues, values, indices, k, softmax, dx)
+    _topk_bwd(dvalues, values, indices, k, softmax, dx)
     return dx
 
 
