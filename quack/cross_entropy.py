@@ -313,14 +313,10 @@ def cross_entropy_fwd_out(
     """
     assert x.dim() == 2, "Input must be 2D"
     assert target.dim() == 1, "Target must be 1D"
-    assert x.is_cuda and target.is_cuda, "Tensors must be on CUDA device"
     assert x.dtype in [torch.float16, torch.bfloat16, torch.float32], "Unsupported input dtype"
     assert target.dtype in [torch.int32, torch.int64], "Target must be int32 or int64"
     if target_logit is not None:
-        assert target_logit.is_cuda, "Target logits must be on CUDA device"
         assert target_logit.dtype in [torch.float16, torch.bfloat16, torch.float32]
-    if dx is not None:
-        assert dx.is_cuda, "dx must be on CUDA device"
     N = x.size(1)
     dtype = torch2cute_dtype_map[x.dtype]
     target_dtype = torch2cute_dtype_map[target.dtype]
@@ -586,9 +582,6 @@ def _cross_entropy_backward(
     assert x.shape[0] == target.shape[0], "Batch dimensions must match"
     assert x.shape[0] == dloss.shape[0], "Batch dimensions must match"
     assert x.shape[0] == lse.shape[0], "Batch dimensions must match"
-    assert x.is_cuda and target.is_cuda and dloss.is_cuda and lse.is_cuda, (
-        "Tensors must be on CUDA device"
-    )
     assert x.dtype in [torch.float16, torch.bfloat16, torch.float32], "Unsupported input dtype"
     assert target.dtype in [torch.int32, torch.int64], "Target must be int32 or int64"
     N = x.size(1)
