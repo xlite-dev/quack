@@ -202,7 +202,7 @@ def test_cross_entropy_ignore_index(M, N, input_dtype, has_weight, use_compile):
     x = (0.1 * torch.randn(M, N, device=device, dtype=input_dtype)).requires_grad_()
     target = torch.randint(0, N, (M,), device=device, dtype=torch.int64)
     weight = (torch.rand(N, device=device, dtype=torch.float32) + 0.1) if has_weight else None
-    ignore_index = N - 1  # Use last class as ignore index
+    ignore_index = -100  # PyTorch default; targets randint'd in [0, N) so won't collide
     ignore_mask = torch.rand(M, device=device) < 0.3  # Randomly ignore ~30% of samples
     target[ignore_mask] = ignore_index
     x_ref = x.detach().clone().float().requires_grad_()
@@ -304,7 +304,7 @@ def test_cross_entropy_fwd_with_grad(M, N, input_dtype, has_weight, inplace_back
     torch.testing.assert_close(dx, dx_ref.to(input_dtype), atol=atol, rtol=rtol)
 
     # Test with ignore_index
-    ignore_index = N - 1
+    ignore_index = -100  # PyTorch default; targets randint'd in [0, N) so won't collide
     ignore_mask = torch.rand(M, device=device) < 0.3
     target[ignore_mask] = ignore_index
     if inplace_backward:
@@ -397,3 +397,22 @@ def test_cross_entropy_weight_reduction(M, N, input_dtype, reduction, use_compil
         loss.backward()
         loss_ref.backward()
         torch.testing.assert_close(x.grad, x_ref.grad.to(input_dtype), atol=atol, rtol=rtol)
+
+
+def test_cross_entropy_bwd_stride0_dloss():
+    """dloss with stride 0 (e.g., scalar broadcast) must be handled by the backward kernel."""
+    device = "cuda"
+    M, N = 77, 1024
+    torch.random.manual_seed(0)
+    x = 0.1 * torch.randn(M, N, device=device, dtype=torch.bfloat16)
+    target = torch.randint(0, N, (M,), device=device, dtype=torch.int64)
+    lse = torch.logsumexp(x.float(), dim=-1)
+    # Scalar grad broadcast to (M,) — stride-0 in the only dim.
+    dloss = torch.ones((), device=device, dtype=torch.float32).expand(M)
+    assert dloss.stride() == (0,)
+    dx = cross_entropy_bwd(x, target, dloss, lse)
+    # Reference: dloss=1 means dx = softmax(x) - one_hot(target)
+    x_ref = x.float().requires_grad_()
+    loss_ref = F.cross_entropy(x_ref, target, reduction="none")
+    (dx_ref,) = torch.autograd.grad(loss_ref, x_ref, grad_outputs=torch.ones_like(loss_ref))
+    torch.testing.assert_close(dx, dx_ref.to(torch.bfloat16), atol=1e-4, rtol=1e-4)

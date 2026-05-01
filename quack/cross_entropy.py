@@ -161,7 +161,13 @@ class CrossEntropy(ReductionBase):
         target_weight = Float32.zero
         if row < shape[0]:
             target = Int32(mTarget[row])
-            target_weight = Float32(mWeight[target]) if const_expr(mWeight is not None) else 1.0
+            if const_expr(mWeight is not None):
+                # Gate on target != ignore_index: ignore_index may be negative
+                # (PyTorch default -100), and indexing mWeight at that offset is OOB.
+                if target != ignore_index:
+                    target_weight = Float32(mWeight[target])
+            else:
+                target_weight = 1.0
 
         if row < shape[0]:
             copy(tXgX, tXsX, is_async=True)
@@ -535,7 +541,13 @@ class CrossEntropyBackward:
         target_weight = Float32.zero
         if row < shape[0]:
             target = Int32(mTarget[row])
-            target_weight = Float32(mWeight[target]) if const_expr(mWeight is not None) else 1.0
+            if const_expr(mWeight is not None):
+                # Gate on target != ignore_index: ignore_index may be negative
+                # (PyTorch default -100), and indexing mWeight at that offset is OOB.
+                if target != ignore_index:
+                    target_weight = Float32(mWeight[target])
+            else:
+                target_weight = 1.0
 
         if row < shape[0]:
             copy(tXgX, tXsX, is_async=True)
@@ -735,16 +747,14 @@ class CrossEntropyFunction(torch.autograd.Function):
                 ignore_index=ignore_index,
                 return_lse=True,
             )
-        ctx.save_for_backward(x, target, lse)
-        ctx.weight = weight
+        ctx.save_for_backward(x, target, lse, weight)
         ctx.ignore_index = ignore_index
         ctx.inplace_backward = inplace_backward
         return loss
 
     @staticmethod
     def backward(ctx, dloss):
-        x, target, lse = ctx.saved_tensors
-        weight = ctx.weight
+        x, target, lse, weight = ctx.saved_tensors
         dx = cross_entropy_bwd(
             x,
             target,
