@@ -183,7 +183,9 @@ class TensorSpec:
     static fields are preserved from the host-side template."""
 
     dtype: Type[cutlass.Numeric]
-    shape: Tuple[int, int]
+    shape: Tuple[
+        int, ...
+    ]  # 2D for matmul operands; 1D supported for vector-with-stage aux operands
     stage: Optional[int] = None
     layout: LayoutEnum = LayoutEnum.ROW_MAJOR
     transposed: bool = False
@@ -333,6 +335,14 @@ class TensorSpec:
         rather than TensorSpec args)."""
         return replace(self, tma_atom=tma_atom, gmem=gmem)
 
+    def with_gmem(self, gmem) -> "TensorSpec":
+        """Return a new spec with only a GMEM tensor attached.
+
+        Use for operands that should cross the kernel boundary as TensorSpecs but
+        are copied with non-TMA helpers.
+        """
+        return replace(self, gmem=gmem)
+
     def with_smem(self, storage_or_tensor) -> "TensorSpec":
         """Return a new spec with the SMEM tensor attached (call inside the kernel).
         Accepts either a SmemAllocator storage field (derives the tensor with this
@@ -355,13 +365,18 @@ class TensorSpec:
         return self.stage is None
 
     @property
-    def storage_shape(self) -> Tuple[int, int]:
+    def storage_shape(self) -> Tuple[int, ...]:
+        # 1D has nothing to transpose.
+        if len(self.shape) == 1:
+            return self.shape
         return (self.shape[1], self.shape[0]) if self.transposed else self.shape
 
     def smem_layout(self, tiled_mma=None):
         """Derive the SMEM layout for this operand.
 
         Resolution order:
+        0. 1D shape (vector-with-stage aux operand) → trivial `cute.make_layout`,
+           no swizzling. Bypasses all matmul-side layout logic.
         1. `smem_layout_override` set → return it as-is.
         2. `smem_axis_pattern` set → axis-pattern helper (Mojo-style, role-free).
         3. `is_epi` → SM100 epi helper.
@@ -383,6 +398,9 @@ class TensorSpec:
         assert not self.in_rmem, "register tensor has no SMEM layout"
         if self.smem_layout_override is not None:
             return self.smem_layout_override
+        if len(self.shape) == 1:
+            # 1D vector-with-stage: no swizzling needed (small + naturally aligned).
+            return cute.make_layout((self.shape[0], self.stage))
         if self.smem_axis_pattern is not None:
             if self.smem_axis_pattern == "K":
                 return make_smem_layout_kmajor(
@@ -427,13 +445,16 @@ class TensorSpec:
         return replace(self, smem_axis_pattern=pattern)
 
     def tma_copy_bytes(self) -> int:
-        return cute.size_in_bytes(self.dtype, cute.select(self.smem_layout(), mode=[0, 1]))
+        # 1D specs have a single non-stage mode; 2D specs have two.
+        modes = [0] if len(self.shape) == 1 else [0, 1]
+        return cute.size_in_bytes(self.dtype, cute.select(self.smem_layout(), mode=modes))
 
     def make_tma_atom(self, op, gmem_tensor, num_multicast: int = 1):
+        modes = [0] if len(self.shape) == 1 else [0, 1]
         return cpasync.make_tiled_tma_atom(
             op,
             gmem_tensor,
-            cute.select(self.smem_layout(), mode=[0, 1]),
+            cute.select(self.smem_layout(), mode=modes),
             self.storage_shape,
             num_multicast=num_multicast,
         )
@@ -458,7 +479,9 @@ class TensorSpec:
     def get_smem_tensor(self, storage_field):
         """Materialize the SMEM tensor backed by `storage_field` with this spec's layout."""
         layout = self.smem_layout()
-        return storage_field.get_tensor(layout.outer, swizzle=layout.inner)
+        if hasattr(layout, "outer"):
+            return storage_field.get_tensor(layout.outer, swizzle=layout.inner)
+        return storage_field.get_tensor(layout)
 
     @property
     def smem_T(self) -> cute.Tensor:
